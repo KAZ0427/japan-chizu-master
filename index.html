@@ -126,14 +126,22 @@ svg#japanMap{display:block;width:100%;height:100%;touch-action:manipulation;}
 .prefecture.m1,.prefecture.m2{fill:var(--learn);}
 .prefecture.m3{fill:var(--master);}
 .prefecture:hover{fill:#bfe6c8;}
-.prefecture.dim{fill:#eef2f1;opacity:.45;pointer-events:none;}
-.prefecture.target{fill:var(--yellow)!important;}
-.prefecture.correct{fill:var(--ok)!important;}
-.prefecture.wrong{fill:var(--ng)!important;}
+.prefecture.dim{fill:#eef2f1;opacity:.4;pointer-events:none;}
+.prefecture.target{fill:#ff8a3d!important;stroke:#8a3a00!important;stroke-width:2.6!important;}
+@keyframes tgpulse{0%,100%{fill:#ffa75f;}50%{fill:#ff5f1a;}}
+.prefecture.target.pulse{animation:tgpulse .8s ease-in-out infinite;}
+.prefecture.correct{fill:var(--ok)!important;stroke:#1b6b2e!important;stroke-width:2!important;}
+.prefecture.wrong{fill:var(--ng)!important;stroke:#a01b1b!important;stroke-width:2!important;}
 .prefecture.picked{fill:#74c0fc!important;}
 .boundary-line line{stroke:#bcd6e6!important;stroke-width:8!important;}
 .maplabel{position:absolute;pointer-events:none;font-weight:900;color:#fff;
   text-shadow:0 1px 3px rgba(0,0,0,.5);font-size:.7rem;transform:translate(-50%,-50%);}
+/* zoom controls overlaid on the map */
+.mapwrap .zoomctl{position:absolute;right:8px;bottom:8px;z-index:5;display:flex;flex-direction:column;gap:6px;}
+.mapwrap .zoomctl button{width:42px;height:42px;border:none;border-radius:12px;background:rgba(255,255,255,.93);
+  box-shadow:var(--shadow);font-size:1.35rem;font-weight:900;color:var(--ink);cursor:pointer;line-height:1;
+  display:flex;align-items:center;justify-content:center;font-family:inherit;}
+.mapwrap .zoomctl button:active{transform:scale(.9);}
 
 /* ---- Learn (zukan) ---- */
 .tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;-webkit-overflow-scrolling:touch;}
@@ -515,7 +523,7 @@ svg#japanMap{display:block;width:100%;height:100%;touch-action:manipulation;}
     <button class="iconbtn" onclick="toggleSound()">🔊</button>
   </div>
   <div class="tabs" id="learnTabs"></div>
-  <div class="mapwrap" id="learnMapSlot"></div>
+  <div class="mapwrap" id="learnMapSlot"><div class="zoomctl"><button onclick="zoomBy(0.7)" aria-label="拡大">＋</button><button onclick="zoomBy(1.43)" aria-label="縮小">−</button><button onclick="resetZoom()" aria-label="リセット">⟳</button></div></div>
   <div class="detail" id="learnDetail">
     <div class="muted">地図か下のボタンから県をえらんでね 👇</div>
     <div class="chipline" id="learnChips" style="margin-top:10px;"></div>
@@ -535,7 +543,7 @@ svg#japanMap{display:block;width:100%;height:100%;touch-action:manipulation;}
     <div class="pill combo" id="hudCombo">🔥0</div>
   </div>
   <div class="qbar" id="qbar"></div>
-  <div class="mapwrap hidden" id="quizMapSlot"></div>
+  <div class="mapwrap hidden" id="quizMapSlot"><div class="zoomctl"><button onclick="zoomBy(0.7)" aria-label="拡大">＋</button><button onclick="zoomBy(1.43)" aria-label="縮小">−</button><button onclick="resetZoom()" aria-label="リセット">⟳</button></div></div>
   <div class="options hidden" id="quizOptions"></div>
   <div class="feedmsg" id="quizFeed"></div>
 </section>
@@ -759,7 +767,7 @@ const svgMap=document.getElementById('japanMap');
 function moveMapTo(slotId){ document.getElementById(slotId).appendChild(svgMap); }
 function returnMap(){ mapHost.appendChild(svgMap); }
 function gFor(c){ return svgMap.querySelector('g[data-code="'+c+'"]'); }
-function clearMapClasses(){ DATA.forEach(d=>{ const g=gFor(d.c); g.classList.remove('dim','target','correct','wrong','picked','m1','m2','m3'); }); }
+function clearMapClasses(){ DATA.forEach(d=>{ const g=gFor(d.c); g.classList.remove('dim','target','pulse','correct','wrong','picked','m1','m2','m3'); }); }
 function paintMastery(scopeCodes){
   DATA.forEach(d=>{
     const g=gFor(d.c); g.classList.remove('m1','m2','m3','dim');
@@ -785,13 +793,18 @@ function rootBBox(c){
     x0=Math.min(x0,nx);y0=Math.min(y0,ny);x1=Math.max(x1,nx);y1=Math.max(y1,ny); });
   return BB[c]={x:x0,y:y0,w:x1-x0,h:y1-y0};
 }
+/* current view (vb) + the fitted "home" view (baseVB) for the active scope */
+let vb={x:0,y:0,w:1000,h:1000};
+let baseVB={x:0,y:0,w:1000,h:1000};
+function applyVB(){ svgMap.setAttribute('viewBox', vb.x+" "+vb.y+" "+vb.w+" "+vb.h); }
 function fitViewBox(x,y,w,h){
   // expand the box to match the visible container's aspect ratio (no distortion, fills the box)
   const slot=svgMap.parentElement;
   const ar=(slot&&slot.clientHeight)? slot.clientWidth/slot.clientHeight : 1;
   let cw=w, ch=h; const cx=x+w/2, cy=y+h/2;
   if(w/h > ar) ch=w/ar; else cw=h*ar;
-  svgMap.setAttribute('viewBox',(cx-cw/2)+" "+(cy-ch/2)+" "+cw+" "+ch);
+  baseVB={x:cx-cw/2, y:cy-ch/2, w:cw, h:ch};
+  vb={...baseVB}; applyVB();
 }
 function zoomToCodes(codes){
   // zoom to the bounding box of given prefecture groups so small ones are tappable
@@ -800,6 +813,63 @@ function zoomToCodes(codes){
   codes.forEach(c=>{ const b=rootBBox(c); x0=Math.min(x0,b.x);y0=Math.min(y0,b.y);x1=Math.max(x1,b.x+b.w);y1=Math.max(y1,b.y+b.h); });
   const padX=(x1-x0)*0.10+22, padY=(y1-y0)*0.10+22;
   fitViewBox(x0-padX, y0-padY, (x1-x0)+padX*2, (y1-y0)+padY*2);
+}
+/* only dim out-of-scope prefectures (no mastery colors) — keeps the highlighted target unambiguous */
+function dimOutside(codes){
+  DATA.forEach(d=>{ const g=gFor(d.c); g.classList.remove('m1','m2','m3');
+    if(codes && !codes.includes(d.c)) g.classList.add('dim'); else g.classList.remove('dim'); });
+}
+
+/* ---- pinch / drag / button zoom so tiny prefectures become tappable ---- */
+function clampW(w){ return Math.min(baseVB.w, Math.max(Math.max(40, baseVB.w/9), w)); }
+function clampPan(){
+  if(vb.w>baseVB.w) vb.w=baseVB.w; if(vb.h>baseVB.h) vb.h=baseVB.h;
+  vb.x=Math.min(Math.max(vb.x, baseVB.x), baseVB.x+baseVB.w-vb.w);
+  vb.y=Math.min(Math.max(vb.y, baseVB.y), baseVB.y+baseVB.h-vb.h);
+}
+function zoomBy(f){
+  const cx=vb.x+vb.w/2, cy=vb.y+vb.h/2;
+  const nw=clampW(vb.w*f), nh=nw*(vb.h/vb.w);
+  vb={x:cx-nw/2, y:cy-nh/2, w:nw, h:nh}; clampPan(); applyVB(); sndTap&&sndTap();
+}
+function resetZoom(){ vb={...baseVB}; applyVB(); }
+const _ptrs=new Map(); let _mode=null,_last=null,_down=null,_pinch=null; let suppressClick=false;
+const _dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y), _mid=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+function setupPanZoom(){
+  const el=svgMap; el.style.touchAction='none';
+  // capture-phase: if the gesture moved the map, swallow the click so no prefecture is mis-selected
+  el.addEventListener('click', e=>{ if(suppressClick){ e.stopPropagation(); e.preventDefault(); suppressClick=false; } }, true);
+  el.addEventListener('pointerdown', e=>{
+    _ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(_ptrs.size===1){ _mode='maybe'; suppressClick=false; _last={x:e.clientX,y:e.clientY}; _down={x:e.clientX,y:e.clientY}; }
+    else if(_ptrs.size===2){ const a=[..._ptrs.values()]; _mode='pinch'; _pinch={dist:_dist(a[0],a[1])||1, mid:_mid(a[0],a[1]), vb:{...vb}}; }
+  });
+  el.addEventListener('pointermove', e=>{
+    if(!_ptrs.has(e.pointerId)) return;
+    _ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    const r=el.getBoundingClientRect();
+    if(_mode==='pinch' && _ptrs.size>=2){
+      const a=[..._ptrs.values()]; const cd=_dist(a[0],a[1])||1, cm=_mid(a[0],a[1]);
+      const nw=clampW(_pinch.vb.w*(_pinch.dist/cd)), nh=nw*(_pinch.vb.h/_pinch.vb.w);
+      const ccx=_pinch.vb.x+(_pinch.mid.x-r.left)/r.width*_pinch.vb.w;
+      const ccy=_pinch.vb.y+(_pinch.mid.y-r.top)/r.height*_pinch.vb.h;
+      vb.w=nw; vb.h=nh; vb.x=ccx-(cm.x-r.left)/r.width*nw; vb.y=ccy-(cm.y-r.top)/r.height*nh;
+      clampPan(); applyVB(); suppressClick=true; e.preventDefault();
+    } else if(_mode==='maybe' || _mode==='pan'){
+      if(Math.hypot(e.clientX-_down.x, e.clientY-_down.y)>9) _mode='pan';
+      if(_mode==='pan'){
+        vb.x-=(e.clientX-_last.x)/r.width*vb.w; vb.y-=(e.clientY-_last.y)/r.height*vb.h;
+        clampPan(); applyVB(); suppressClick=true; _last={x:e.clientX,y:e.clientY}; e.preventDefault();
+      }
+    }
+  });
+  const up=e=>{
+    _ptrs.delete(e.pointerId);
+    if(_ptrs.size===0) _mode=null;
+    else { const p=[..._ptrs.values()][0]; _mode='maybe'; _last={x:p.x,y:p.y}; _down={x:p.x,y:p.y}; suppressClick=true; }
+  };
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
 }
 
 /* ---------------- LEARN / ZUKAN ---------------- */
@@ -944,16 +1014,17 @@ function nextQuestion(){
 
   if(Q.mode==='location'){
     optBox.classList.add('hidden'); mapSlot.classList.remove('hidden');
-    qbar.innerHTML='<div class="ask">この県は どこ？ タップしてね</div><div class="big">'+fullName(d)+'</div>';
+    qbar.innerHTML='<div class="ask">この県は どこ？ タップしてね</div><div class="big">'+fullName(d)+'</div>'+
+      '<div class="sub">指でひろげて拡大・＋−ボタンでも拡大できるよ🔍</div>';
     moveMapTo('quizMapSlot'); clearMapClasses();
     paintMastery(Q.codes); zoomToCodes(Q.codes);
     setMapClick(onMapAnswer);
   } else if(Q.mode==='name'){
     optBox.classList.remove('hidden'); mapSlot.classList.remove('hidden');
-    qbar.innerHTML='<div class="ask">光っている県の 名前は？</div>';
+    qbar.innerHTML='<div class="ask">🟠 オレンジに光っている県の 名前は？</div>';
     moveMapTo('quizMapSlot'); clearMapClasses();
-    paintMastery(Q.codes); zoomToCodes(Q.codes);
-    gFor(c).classList.remove('dim'); gFor(c).classList.add('target');
+    dimOutside(Q.codes); zoomToCodes(Q.codes);
+    const tg=gFor(c); tg.classList.remove('dim'); tg.classList.add('target','pulse');
     setMapClick(null);
     buildOptions(c, d=>fullName(d), false);
   } else if(Q.mode==='kanji'){
@@ -991,7 +1062,8 @@ function onOptAnswer(c,correctC,btn){
   if(Q.answered) return; Q.answered=true;
   const ok=(c===correctC);
   btn.classList.add(ok?'ok':'no');
-  if(!ok){ [...document.querySelectorAll('.opt')].forEach(b=>{ if(b.innerHTML===fullName(byCode[correctC])) b.classList.add('ok'); }); if(Q.mode==='name'){ gFor(correctC).classList.remove('target'); gFor(correctC).classList.add('correct'); } }
+  if(!ok){ [...document.querySelectorAll('.opt')].forEach(b=>{ if(b.innerHTML===fullName(byCode[correctC])) b.classList.add('ok'); }); }
+  if(Q.mode==='name'){ const tg=gFor(correctC); tg.classList.remove('target','pulse','dim'); tg.classList.add('correct'); }
   document.querySelectorAll('.opt').forEach(b=>b.disabled=true);
   judge(ok, correctC);
 }
@@ -1143,6 +1215,7 @@ function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.rand
 if('serviceWorker' in navigator){ addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{})); }
 
 /* ---------------- boot ---------------- */
+setupPanZoom();
 go('home');
 </script>
 </body>
